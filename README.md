@@ -22,6 +22,8 @@ The system autonomously fetches real-time environmental data, continuously train
 * **Real-Time Live Dashboard:** Displays current PM2.5, PM10, CO, and NO2 levels.
 * **24-Hour AI Forecast:** Interactive area charts predicting hourly PM2.5 trends.
 * **3-Day Outlook:** Color-coded AQI severity predictions (Good, Moderate, Unhealthy).
+* **Hazardous AQI Alerts:** Automated UI warnings triggered when PM2.5 concentrations cross dangerous thresholds (> 75 µg/m³).
+* **Advanced AI Analytics (SHAP):** Feature importance visualizations explaining how specific pollutants drive the AI predictions.
 * **Fully Automated CI/CD Pipelines:** Zero manual intervention required for data updates or model training.
 
 ## 🏗️ System Architecture & MLOps Pipeline
@@ -32,11 +34,10 @@ This project utilizes a modern MLOps architecture rather than a conventional sta
    * `Hourly Feature Pipeline`: Fetches new environmental data via API and updates the MongoDB database every hour.
    * `Daily Model Training`: Retrains the Scikit-Learn **Random Forest** model every 24 hours to ensure adaptability to recent atmospheric changes.
 3. **Frontend Deployment:** Deployed on **Streamlit Cloud** for an accessible and intuitive user interface.
-
 ## 🛠️ Technology Stack
 * **Programming Language:** Python 3.11
-* **Machine Learning:** Scikit-Learn, Pandas
-* **Data Visualization:** Plotly
+* **Machine Learning & Analytics:** Scikit-Learn, Pandas, SHAP (Explainable AI)
+* **Data Visualization:** Plotly, Matplotlib
 * **Database:** MongoDB (PyMongo)
 * **Automation:** GitHub Actions (YAML)
 * **Web Framework:** Streamlit
