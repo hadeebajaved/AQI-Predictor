@@ -1,15 +1,14 @@
-
-
 import pandas as pd
 import os
 import pickle
 from pymongo import MongoClient
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.metrics import mean_squared_error, r2_score
+from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error 
 
 # --- 1. Fetch from Feature Store (MongoDB) ---
 MONGO_URI = os.getenv("MONGO_URI")
+
 
 print("Connecting to MongoDB to fetch features...")
 client = MongoClient(MONGO_URI)
@@ -19,7 +18,11 @@ collection = db['Historical_Features']
 # Convert MongoDB data back to Pandas DataFrame
 data = list(collection.find({}, {'_id': 0}))
 df = pd.DataFrame(data)
-print(f"Data loaded successfully! Total Rows: {df.shape[0]}")
+
+# YAHAN HUM TARGET WALI KHALI ROWS DROP KAR RAHE HAIN SIRF TRAINING KE LIYE
+df = df.dropna(subset=['Target_PM2.5_Next_Day'])
+
+print(f"Data loaded successfully! Total Rows for Training: {df.shape[0]}")
 
 # --- 2. Train-Test Split ---
 print("Preparing data for training...")
@@ -38,13 +41,15 @@ model.fit(X_train, y_train)
 
 # --- 4. Evaluate Performance ---
 predictions = model.predict(X_test)
-# Yahan humne error fix kar diya hai
+
 mse = mean_squared_error(y_test, predictions)
 rmse = mse ** 0.5
 r2 = r2_score(y_test, predictions)
+mae = mean_absolute_error(y_test, predictions)
 
 print("\n--- Model Evaluation ---")
 print(f"RMSE (Error): {rmse:.2f}")
+print(f"MAE (Absolute Error): {mae:.2f}")
 print(f"R2 Score (Accuracy): {r2:.2f}")
 
 # --- 5. Save the Trained Model ---
