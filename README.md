@@ -47,7 +47,20 @@ git clone [https://github.com/hadeebajaved/AQI-Predictor.git](https://github.com
 cd AQI-Predictor
 ```
 
-2. Install Dependencies:
-
-Bash
+**2. Install Dependencies:**
+```bash
 pip install -r requirements.txt
+```
+
+**3. Setup Environment Variables:**
+
+Create a `.env` file in the root directory and add your MongoDB connection string:
+
+```ini
+MONGO_URI=your_mongodb_connection_string_here
+
+**4. Run the Streamlit Dashboard:**
+
+```bash
+streamlit run app.py
+```
