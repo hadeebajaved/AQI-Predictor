@@ -19,8 +19,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- AQICN API TOKEN (SECURE METHOD) ---
-# Yahan Streamlit secrets se token automatically fetch ho jayega
+# --- AQICN API TOKEN ---
 AQICN_TOKEN = st.secrets["AQICN_TOKEN"]
 
 # --- 2. Load Model ---
@@ -35,7 +34,7 @@ def load_model():
 
 model = load_model()
 
-# --- 3. Fetch Historical Data from MongoDB (For Forecast & SHAP) ---
+# --- 3. Fetch Historical Data from MongoDB ---
 @st.cache_data(ttl=60)
 def get_historical_data():
     MONGO_URI = st.secrets["MONGO_URI"]
@@ -54,19 +53,19 @@ def get_historical_data():
 
 df_history = get_historical_data()
 
-# --- 4. Fetch Live Data from AQICN API ---
+# --- 4. Fetch Live Data from AQICN API (Fixed with None instead of 0) ---
 @st.cache_data(ttl=60)
 def get_live_aqicn_data():
     try:
         url = f"https://api.waqi.info/feed/lahore/?token={AQICN_TOKEN}"
         res = requests.get(url).json()
-        if res['status'] == 'ok':
+        if res.get('status') == 'ok':
             data = res['data']['iaqi']
             return {
-                'PM2.5': data.get('pm25', {}).get('v', 0),
-                'PM10': data.get('pm10', {}).get('v', 0),
-                'CO': data.get('co', {}).get('v', 0),
-                'NO2': data.get('no2', {}).get('v', 0)
+                'PM2.5': data.get('pm25', {}).get('v', None),
+                'PM10': data.get('pm10', {}).get('v', None),
+                'CO': data.get('co', {}).get('v', None),
+                'NO2': data.get('no2', {}).get('v', None)
             }
     except:
         pass
@@ -90,11 +89,14 @@ if df_history.empty:
 else:
     latest_mongo_row = df_history.iloc[0]
     
-    # Use AQICN data if available, else fallback to MongoDB
-    live_pm25 = live_aqi['PM2.5'] if live_aqi else latest_mongo_row['PM2.5']
-    live_pm10 = live_aqi['PM10'] if live_aqi else latest_mongo_row['PM10']
-    live_co = live_aqi['CO'] if live_aqi else latest_mongo_row['CO']
-    live_no2 = live_aqi['NO2'] if live_aqi else latest_mongo_row['NO2']
+    # --- SMART FALLBACK LOGIC ---
+    if live_aqi is None:
+        st.warning("⚠️ Live API Token is missing/invalid. Falling back to MongoDB backend data.")
+        
+    live_pm25 = live_aqi['PM2.5'] if (live_aqi and live_aqi['PM2.5'] is not None) else latest_mongo_row['PM2.5']
+    live_pm10 = live_aqi['PM10'] if (live_aqi and live_aqi['PM10'] is not None) else latest_mongo_row['PM10']
+    live_co = live_aqi['CO'] if (live_aqi and live_aqi['CO'] is not None) else latest_mongo_row['CO']
+    live_no2 = live_aqi['NO2'] if (live_aqi and live_aqi['NO2'] is not None) else latest_mongo_row['NO2']
 
     # --- REQUIREMENT MET: HAZARDOUS ALERT ---
     if live_pm25 > 150:
@@ -136,9 +138,9 @@ else:
     # --- TABS FOR DASHBOARD ---
     tab1, tab2, tab3, tab4 = st.tabs(["📊 Current Status", "📈 Next 24 Hours", "📅 3-Day Forecast", "🧠 AI Explainer (SHAP)"])
     
-    # TAB 1: CURRENT LIVE DATA (Now powered by AQICN)
+    # TAB 1: CURRENT LIVE DATA
     with tab1:
-        st.subheader("Live Environmental Metrics (AQICN Sensors)")
+        st.subheader("Live Environmental Metrics")
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("🌫️ PM2.5 (AQI Proxy)", f"{live_pm25} µg/m³")
         col2.metric("😷 PM10 Level", f"{live_pm10} µg/m³")
@@ -168,9 +170,9 @@ else:
         st.subheader("Advanced Analytics: Feature Importance (SHAP)")
         st.write("This AI explainer shows how much each environmental factor contributes to the PM2.5 prediction.")
         if model is not None:
-            X_sample = df_history[features].dropna()
+            # SHAP calculations take a second, so we use a small sample
+            X_sample = df_history[features].dropna().tail(50)
             
-            # Create SHAP Explainer
             explainer = shap.TreeExplainer(model)
             shap_values = explainer.shap_values(X_sample)
             
