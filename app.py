@@ -4,7 +4,6 @@ import plotly.express as px
 from pymongo import MongoClient
 from datetime import datetime, timedelta
 import random
-import os
 
 # --- 1. Page Configuration ---
 st.set_page_config(page_title="Lahore AQI AI", page_icon="🌍", layout="wide")
@@ -29,7 +28,7 @@ def load_model():
 
 model = load_model()
 
-# --- 3. Fetch Data from MongoDB ---
+# --- 3. Fetch Data from MongoDB (Fixed for Time-Travel Bug) ---
 @st.cache_data(ttl=60)
 def get_recent_data():
     MONGO_URI = st.secrets["MONGO_URI"]
@@ -37,9 +36,21 @@ def get_recent_data():
     db = client['AQI_Project']
     collection = db['Historical_Features']
     
-    records = list(collection.find({}, {'_id': 0}).sort([("datetime", -1)]).limit(1))
+    # 48 ghante ka data fetch kar rahe hain taake future predictions filter ho sakein
+    records = list(collection.find({}, {'_id': 0}).sort([("datetime", -1)]).limit(48))
+    
     if records:
-        return pd.DataFrame(records)
+        df = pd.DataFrame(records)
+        df['datetime'] = pd.to_datetime(df['datetime']).dt.tz_localize(None) 
+        
+        # Current time check karein aur future ki rows (jaise raat 11 baje) ko nikaal dein
+        current_time = pd.Timestamp.now()
+        df = df[df['datetime'] <= current_time]
+        
+        if not df.empty:
+            # Ab jo sab se upar row hogi, wo exactly "Abhi" (Current Hour) ki hogi
+            return df.head(1)
+            
     return pd.DataFrame()
 
 df_data = get_recent_data()
@@ -49,19 +60,12 @@ with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/3203/3203071.png", width=100)
     st.title("🌱 10Shine AQI")
     st.write("Real-time Lahore Air Quality and AI Forecast.")
-    
     if model is None:
         st.warning("⚠️ Local Test Mode: ML Model is disabled to prevent Windows error. Visuals are simulated for design testing. Real predictions will work on Cloud.")
-        
-    # Name added in Sidebar
-    st.markdown("---")
-    st.markdown("👩‍💻 **Developed by Hadeeba Javed**")
 
 # --- 5. Main UI Header ---
 st.title("🌍 Lahore Real-Time AQI & AI Forecast")
 st.markdown("Automated 24-Hour & 3-Day Environmental Outlook")
-# Name added under Main Title
-st.caption("✨ Developed by Hadeeba Javed")
 st.divider()
 
 if df_data.empty:
