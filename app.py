@@ -31,7 +31,7 @@ model = load_model()
 # --- 3. Fetch Data from MongoDB ---
 @st.cache_data(ttl=60)
 def get_recent_data():
-    MONGO_URI = "mongodb+srv://admin:Hadeeba.121@cluster0.eip7e7u.mongodb.net/?appName=Cluster0"
+    MONGO_URI = os.getenv("MONGO_URI")
     client = MongoClient(MONGO_URI)
     db = client['AQI_Project']
     collection = db['Historical_Features']
