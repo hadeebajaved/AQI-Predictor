@@ -24,4 +24,4 @@ jobs:
       - name: Run Model Training Script
         env:
           MONGO_URI: ${{ secrets.MONGO_URI }}
-        run: python train_model.py
+        run: python 02_training_pipeline.py
