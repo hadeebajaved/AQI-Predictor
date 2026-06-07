@@ -3,3 +3,5 @@ pandas
 plotly
 pymongo
 scikit-learn
+requests
+python-dotenv
