@@ -19,10 +19,9 @@ jobs:
           python-version: '3.11'
 
       - name: Install Requirements
-        run: pip install pandas pymongo scikit-learn
+        run: pip install -r requirements.txt
 
       - name: Run Model Training Script
         env:
           MONGO_URI: ${{ secrets.MONGO_URI }}
         run: python 02_training_pipeline.py
-
