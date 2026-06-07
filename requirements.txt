@@ -1,7 +1,8 @@
 streamlit
 pandas
-plotly
-pymongo
 scikit-learn
+pymongo
+plotly
 requests
-python-dotenv
+shap
+matplotlib
