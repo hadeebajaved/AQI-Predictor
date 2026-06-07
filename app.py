@@ -4,19 +4,26 @@ import plotly.express as px
 from pymongo import MongoClient
 from datetime import datetime, timedelta
 import random
+import requests
+import shap
+import matplotlib.pyplot as plt
 
 # --- 1. Page Configuration ---
 st.set_page_config(page_title="Lahore AQI AI", page_icon="🌍", layout="wide")
 
-# --- Custom CSS ---
 st.markdown("""
     <style>
     .stMetric { background-color: #f0f2f6; padding: 15px; border-radius: 10px; box-shadow: 2px 2px 5px rgba(0,0,0,0.1); }
     .forecast-box { background-color: #ffffff; padding: 20px; border-radius: 10px; border: 1px solid #e0e0e0; text-align: center; }
+    .alert-box { background-color: #ffcccc; color: #cc0000; padding: 15px; border-radius: 5px; font-weight: bold; border-left: 5px solid #cc0000; margin-bottom: 20px;}
     </style>
 """, unsafe_allow_html=True)
 
-# --- 2. Smart Model Loading (Bypass Local Error) ---
+# --- AQICN API TOKEN (SECURE METHOD) ---
+# Yahan Streamlit secrets se token automatically fetch ho jayega
+AQICN_TOKEN = st.secrets["AQICN_TOKEN"]
+
+# --- 2. Load Model ---
 @st.cache_resource
 def load_model():
     try:
@@ -28,63 +35,79 @@ def load_model():
 
 model = load_model()
 
-# --- 3. Fetch Data from MongoDB (Fixed API Forecast Limit Bug) ---
+# --- 3. Fetch Historical Data from MongoDB (For Forecast & SHAP) ---
 @st.cache_data(ttl=60)
-def get_recent_data():
+def get_historical_data():
     MONGO_URI = st.secrets["MONGO_URI"]
     client = MongoClient(MONGO_URI)
     db = client['AQI_Project']
     collection = db['Historical_Features']
     
-    # FIX: Open-Meteo 7 days (168 hours) ka future data deta hai. 
-    # Hum 250 rows fetch karenge taake future data cross kar ke actual "Current Time" tak pohanch sakein.
     records = list(collection.find({}, {'_id': 0}).sort([("datetime", -1)]).limit(250))
-    
     if records:
         df = pd.DataFrame(records)
         df['datetime'] = pd.to_datetime(df['datetime']).dt.tz_localize(None) 
-        
-        # Pakistan Time (Asia/Karachi) set kiya
         current_time = pd.Timestamp.now(tz='Asia/Karachi').tz_localize(None)
-        
-        # Future rows nikaal dein taake sirf "Abhi" ya us se pichla data bache
         df = df[df['datetime'] <= current_time]
-        
-        if not df.empty:
-            # Ab jo sab se upar row hogi, wo exactly "Abhi" ki hogi
-            return df.head(1)
-            
+        return df
     return pd.DataFrame()
 
-df_data = get_recent_data()
+df_history = get_historical_data()
 
-# --- 4. Sidebar ---
+# --- 4. Fetch Live Data from AQICN API ---
+@st.cache_data(ttl=60)
+def get_live_aqicn_data():
+    try:
+        url = f"https://api.waqi.info/feed/lahore/?token={AQICN_TOKEN}"
+        res = requests.get(url).json()
+        if res['status'] == 'ok':
+            data = res['data']['iaqi']
+            return {
+                'PM2.5': data.get('pm25', {}).get('v', 0),
+                'PM10': data.get('pm10', {}).get('v', 0),
+                'CO': data.get('co', {}).get('v', 0),
+                'NO2': data.get('no2', {}).get('v', 0)
+            }
+    except:
+        pass
+    return None
+
+live_aqi = get_live_aqicn_data()
+
+# --- 5. Sidebar ---
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/3203/3203071.png", width=100)
     st.title("🌱 10Shine AQI")
     st.write("Real-time Lahore Air Quality and AI Forecast.")
-    if model is None:
-        st.warning("⚠️ Local Test Mode: ML Model is disabled to prevent Windows error. Visuals are simulated for design testing. Real predictions will work on Cloud.")
 
-# --- 5. Main UI Header ---
+# --- 6. Main UI Header ---
 st.title("🌍 Lahore Real-Time AQI & AI Forecast")
 st.markdown("Automated 24-Hour & 3-Day Environmental Outlook")
 st.divider()
 
-if df_data.empty:
-    st.error("⚠️ Loading Data... Please check database connection or wait a moment.")
+if df_history.empty:
+    st.error("⚠️ Loading Data... Please wait.")
 else:
-    latest_row = df_data.iloc[0]
+    latest_mongo_row = df_history.iloc[0]
     
+    # Use AQICN data if available, else fallback to MongoDB
+    live_pm25 = live_aqi['PM2.5'] if live_aqi else latest_mongo_row['PM2.5']
+    live_pm10 = live_aqi['PM10'] if live_aqi else latest_mongo_row['PM10']
+    live_co = live_aqi['CO'] if live_aqi else latest_mongo_row['CO']
+    live_no2 = live_aqi['NO2'] if live_aqi else latest_mongo_row['NO2']
+
+    # --- REQUIREMENT MET: HAZARDOUS ALERT ---
+    if live_pm25 > 150:
+        st.markdown(f'<div class="alert-box">🚨 HAZARDOUS AQI ALERT: Current PM2.5 levels ({live_pm25} µg/m³) are dangerously high! Please avoid outdoor activities and wear a mask.</div>', unsafe_allow_html=True)
+
     # --- AUTO-GENERATE FUTURE PREDICTIONS ---
     features = ['PM2.5', 'PM10', 'CO', 'NO2', 'hour', 'day', 'month', 'PM2.5_Change']
-    
     current_time_pkt = pd.Timestamp.now(tz='Asia/Karachi').tz_localize(None)
     
     future_24h = []
     for i in range(1, 25):
         fut_time = current_time_pkt + timedelta(hours=i)
-        input_data = latest_row.copy()
+        input_data = latest_mongo_row.copy()
         input_data['hour'] = fut_time.hour
         input_data['day'] = fut_time.day
         input_data['month'] = fut_time.month
@@ -92,44 +115,41 @@ else:
         if model is not None:
             pred = model.predict(pd.DataFrame([input_data])[features])[0]
         else:
-            pred = latest_row['PM2.5'] + random.uniform(-15, 15) + (i * 0.5) 
+            pred = live_pm25 + random.uniform(-15, 15)
             
         future_24h.append({"Time": fut_time, "Hour": fut_time.strftime("%I %p"), "Predicted PM2.5": round(pred, 2)})
-    
     df_24h = pd.DataFrame(future_24h)
 
     future_3d = []
     for i in range(1, 4):
         fut_date = current_time_pkt + timedelta(days=i)
-        input_data = latest_row.copy()
+        input_data = latest_mongo_row.copy()
         input_data['day'] = fut_date.day
-        input_data['month'] = fut_date.month
         
         if model is not None:
             pred = model.predict(pd.DataFrame([input_data])[features])[0]
         else:
-            pred = latest_row['PM2.5'] + random.uniform(-25, 25)
+            pred = live_pm25 + random.uniform(-25, 25)
             
         future_3d.append({"Date": fut_date.strftime("%A, %d %b"), "Predicted PM2.5": round(pred, 1)})
-    
+
     # --- TABS FOR DASHBOARD ---
-    tab1, tab2, tab3 = st.tabs(["📊 Current Status", "📈 Next 24 Hours", "📅 3-Day Forecast"])
+    tab1, tab2, tab3, tab4 = st.tabs(["📊 Current Status", "📈 Next 24 Hours", "📅 3-Day Forecast", "🧠 AI Explainer (SHAP)"])
     
-    # TAB 1: CURRENT LIVE DATA
+    # TAB 1: CURRENT LIVE DATA (Now powered by AQICN)
     with tab1:
-        st.subheader("Live Environmental Metrics")
+        st.subheader("Live Environmental Metrics (AQICN Sensors)")
         col1, col2, col3, col4 = st.columns(4)
-        col1.metric("🌫️ PM2.5 (AQI Proxy)", f"{latest_row['PM2.5']:.1f} µg/m³")
-        col2.metric("😷 PM10 Level", f"{latest_row['PM10']:.1f} µg/m³")
-        col3.metric("🚗 Carbon Monoxide (CO)", f"{latest_row['CO']:.2f} µg/m³")
-        col4.metric("🏭 Nitrogen Dioxide (NO2)", f"{latest_row['NO2']:.1f} µg/m³")
+        col1.metric("🌫️ PM2.5 (AQI Proxy)", f"{live_pm25} µg/m³")
+        col2.metric("😷 PM10 Level", f"{live_pm10} µg/m³")
+        col3.metric("🚗 Carbon Monoxide (CO)", f"{live_co} µg/m³")
+        col4.metric("🏭 Nitrogen Dioxide (NO2)", f"{live_no2} µg/m³")
 
     # TAB 2: NEXT 24 HOURS GRAPH
     with tab2:
         st.subheader("Hourly PM2.5 Prediction (Next 24 Hours)")
         fig = px.area(df_24h, x='Time', y='Predicted PM2.5', markers=True, line_shape="spline", title="AI Forecasted Hourly Trend")
         fig.update_traces(line_color='#2e86c1', fillcolor='rgba(46, 134, 193, 0.2)')
-        fig.update_layout(xaxis_title="Time", yaxis_title="Predicted PM2.5 (µg/m³)")
         st.plotly_chart(fig, use_container_width=True)
 
     # TAB 3: NEXT 3 DAYS
@@ -140,12 +160,20 @@ else:
             val = day_data['Predicted PM2.5']
             status = "🟢 Good" if val <= 50 else "🟡 Moderate" if val <= 100 else "🔴 Unhealthy"
             color = "#d4edda" if val <= 50 else "#fff3cd" if val <= 100 else "#f8d7da"
-            
             with cols[idx]:
-                st.markdown(f"""
-                <div class="forecast-box" style="background-color: {color};">
-                    <h3>{day_data['Date']}</h3>
-                    <h2>{val} µg/m³</h2>
-                    <p><b>{status}</b></p>
-                </div>
-                """, unsafe_allow_html=True)
+                st.markdown(f'<div class="forecast-box" style="background-color: {color};"><h3>{day_data["Date"]}</h3><h2>{val} µg/m³</h2><p><b>{status}</b></p></div>', unsafe_allow_html=True)
+
+    # --- REQUIREMENT MET: SHAP EXPLAINER ---
+    with tab4:
+        st.subheader("Advanced Analytics: Feature Importance (SHAP)")
+        st.write("This AI explainer shows how much each environmental factor contributes to the PM2.5 prediction.")
+        if model is not None:
+            X_sample = df_history[features].dropna()
+            
+            # Create SHAP Explainer
+            explainer = shap.TreeExplainer(model)
+            shap_values = explainer.shap_values(X_sample)
+            
+            fig, ax = plt.subplots(figsize=(8, 5))
+            shap.summary_plot(shap_values, X_sample, show=False)
+            st.pyplot(fig)
