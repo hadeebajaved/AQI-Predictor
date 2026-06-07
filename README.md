@@ -58,6 +58,7 @@ Create a `.env` file in the root directory and add your MongoDB connection strin
 
 ```ini
 MONGO_URI=your_mongodb_connection_string_here
+```
 
 **4. Run the Streamlit Dashboard:**
 
