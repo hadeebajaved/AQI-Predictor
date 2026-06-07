@@ -1,4 +1,3 @@
-
 import pandas as pd
 import os
 import requests
@@ -42,15 +41,15 @@ df['PM2.5_Change'] = df['PM2.5'].diff().fillna(0)
 # Target: Predicting next 24 hours PM2.5
 df['Target_PM2.5_Next_Day'] = df['PM2.5'].shift(-24)
 
-# Ab sirf woh aakhri 24 ghante drop karein jin ka target nahi hai
-df = df.dropna(subset=['Target_PM2.5_Next_Day'])
+# HUM NE YAHAN SE DROPNA HATA DIYA HAI TAQAY LATEST DATA DELETE NA HO
 
 print(f"Data ready! Total Rows: {df.shape[0]}")
 
 if not df.empty:
-    # --- 3. Push to Feature Store ---
-    # Aapka exact password aur link yahan daal diya hai
+    # # --- 3. Push to Feature Store ---
     MONGO_URI = os.getenv("MONGO_URI")
+
+    
     print("Connecting to MongoDB Atlas...")
     client = MongoClient(MONGO_URI)
     db = client['AQI_Project']
