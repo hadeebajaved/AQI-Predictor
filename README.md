@@ -43,8 +43,8 @@ This project utilizes a modern MLOps architecture rather than a conventional sta
 ## 🚀 How to Run Locally
 **1. Clone the repository:**
 ```bash
-git clone [https://github.com/hadeebajaved/AQI-Predictor.git](https://github.com/hadeebajaved/AQI-Predictor.git)
-cd AQI-Predictor
+```git clone [https://github.com/hadeebajaved/AQI-Predictor.git](https://github.com/hadeebajaved/AQI-Predictor.git)
+cd AQI-Predictor```
 
 2. Install Dependencies:
 
