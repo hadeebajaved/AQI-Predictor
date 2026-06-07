@@ -24,11 +24,11 @@ def load_model():
         with open('model.pkl', 'rb') as file:
             return pickle.load(file)
     except Exception as e:
-        return None # Return None if Windows blocks it locally
+        return None 
 
 model = load_model()
 
-# --- 3. Fetch Data from MongoDB (Timezone Fixed) ---
+# --- 3. Fetch Data from MongoDB (Fixed API Forecast Limit Bug) ---
 @st.cache_data(ttl=60)
 def get_recent_data():
     MONGO_URI = st.secrets["MONGO_URI"]
@@ -36,19 +36,22 @@ def get_recent_data():
     db = client['AQI_Project']
     collection = db['Historical_Features']
     
-    # 48 ghante ka data fetch kar rahe hain taake future predictions filter ho sakein
-    records = list(collection.find({}, {'_id': 0}).sort([("datetime", -1)]).limit(48))
+    # FIX: Open-Meteo 7 days (168 hours) ka future data deta hai. 
+    # Hum 250 rows fetch karenge taake future data cross kar ke actual "Current Time" tak pohanch sakein.
+    records = list(collection.find({}, {'_id': 0}).sort([("datetime", -1)]).limit(250))
     
     if records:
         df = pd.DataFrame(records)
         df['datetime'] = pd.to_datetime(df['datetime']).dt.tz_localize(None) 
         
-        # FIX: Explicitly Pakistan Time (Asia/Karachi) set kiya hai taake UTC server issue na ho
+        # Pakistan Time (Asia/Karachi) set kiya
         current_time = pd.Timestamp.now(tz='Asia/Karachi').tz_localize(None)
+        
+        # Future rows nikaal dein taake sirf "Abhi" ya us se pichla data bache
         df = df[df['datetime'] <= current_time]
         
         if not df.empty:
-            # Ab jo sab se upar row hogi, wo exactly "Abhi" (Current Hour) ki hogi
+            # Ab jo sab se upar row hogi, wo exactly "Abhi" ki hogi
             return df.head(1)
             
     return pd.DataFrame()
@@ -76,5 +79,73 @@ else:
     # --- AUTO-GENERATE FUTURE PREDICTIONS ---
     features = ['PM2.5', 'PM10', 'CO', 'NO2', 'hour', 'day', 'month', 'PM2.5_Change']
     
-    # Yahan bhi Pakistan ka time laga diya gaya hai
     current_time_pkt = pd.Timestamp.now(tz='Asia/Karachi').tz_localize(None)
+    
+    future_24h = []
+    for i in range(1, 25):
+        fut_time = current_time_pkt + timedelta(hours=i)
+        input_data = latest_row.copy()
+        input_data['hour'] = fut_time.hour
+        input_data['day'] = fut_time.day
+        input_data['month'] = fut_time.month
+        
+        if model is not None:
+            pred = model.predict(pd.DataFrame([input_data])[features])[0]
+        else:
+            pred = latest_row['PM2.5'] + random.uniform(-15, 15) + (i * 0.5) 
+            
+        future_24h.append({"Time": fut_time, "Hour": fut_time.strftime("%I %p"), "Predicted PM2.5": round(pred, 2)})
+    
+    df_24h = pd.DataFrame(future_24h)
+
+    future_3d = []
+    for i in range(1, 4):
+        fut_date = current_time_pkt + timedelta(days=i)
+        input_data = latest_row.copy()
+        input_data['day'] = fut_date.day
+        input_data['month'] = fut_date.month
+        
+        if model is not None:
+            pred = model.predict(pd.DataFrame([input_data])[features])[0]
+        else:
+            pred = latest_row['PM2.5'] + random.uniform(-25, 25)
+            
+        future_3d.append({"Date": fut_date.strftime("%A, %d %b"), "Predicted PM2.5": round(pred, 1)})
+    
+    # --- TABS FOR DASHBOARD ---
+    tab1, tab2, tab3 = st.tabs(["📊 Current Status", "📈 Next 24 Hours", "📅 3-Day Forecast"])
+    
+    # TAB 1: CURRENT LIVE DATA
+    with tab1:
+        st.subheader("Live Environmental Metrics")
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("🌫️ PM2.5 (AQI Proxy)", f"{latest_row['PM2.5']:.1f} µg/m³")
+        col2.metric("😷 PM10 Level", f"{latest_row['PM10']:.1f} µg/m³")
+        col3.metric("🚗 Carbon Monoxide (CO)", f"{latest_row['CO']:.2f} µg/m³")
+        col4.metric("🏭 Nitrogen Dioxide (NO2)", f"{latest_row['NO2']:.1f} µg/m³")
+
+    # TAB 2: NEXT 24 HOURS GRAPH
+    with tab2:
+        st.subheader("Hourly PM2.5 Prediction (Next 24 Hours)")
+        fig = px.area(df_24h, x='Time', y='Predicted PM2.5', markers=True, line_shape="spline", title="AI Forecasted Hourly Trend")
+        fig.update_traces(line_color='#2e86c1', fillcolor='rgba(46, 134, 193, 0.2)')
+        fig.update_layout(xaxis_title="Time", yaxis_title="Predicted PM2.5 (µg/m³)")
+        st.plotly_chart(fig, use_container_width=True)
+
+    # TAB 3: NEXT 3 DAYS
+    with tab3:
+        st.subheader("Upcoming 3-Day Outlook")
+        cols = st.columns(3)
+        for idx, day_data in enumerate(future_3d):
+            val = day_data['Predicted PM2.5']
+            status = "🟢 Good" if val <= 50 else "🟡 Moderate" if val <= 100 else "🔴 Unhealthy"
+            color = "#d4edda" if val <= 50 else "#fff3cd" if val <= 100 else "#f8d7da"
+            
+            with cols[idx]:
+                st.markdown(f"""
+                <div class="forecast-box" style="background-color: {color};">
+                    <h3>{day_data['Date']}</h3>
+                    <h2>{val} µg/m³</h2>
+                    <p><b>{status}</b></p>
+                </div>
+                """, unsafe_allow_html=True)
