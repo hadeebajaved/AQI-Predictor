@@ -24,4 +24,4 @@ jobs:
       - name: Run Data Fetching Script
         env:
           MONGO_URI: ${{ secrets.MONGO_URI }}
-        run: python feature_pipeline.py
+        run: python 01_feature_pipeline.py
