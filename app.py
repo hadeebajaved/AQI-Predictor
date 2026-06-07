@@ -4,7 +4,6 @@ import plotly.express as px
 from pymongo import MongoClient
 from datetime import datetime, timedelta
 import random
-import requests
 import shap
 import matplotlib.pyplot as plt
 
@@ -19,9 +18,6 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- AQICN API TOKEN ---
-AQICN_TOKEN = st.secrets["AQICN_TOKEN"]
-
 # --- 2. Load Model ---
 @st.cache_resource
 def load_model():
@@ -34,7 +30,7 @@ def load_model():
 
 model = load_model()
 
-# --- 3. Fetch Historical Data from MongoDB ---
+# --- 3. Fetch Data from MongoDB (Open-Meteo Backend) ---
 @st.cache_data(ttl=60)
 def get_historical_data():
     MONGO_URI = st.secrets["MONGO_URI"]
@@ -53,33 +49,13 @@ def get_historical_data():
 
 df_history = get_historical_data()
 
-# --- 4. Fetch Live Data from AQICN API (Fixed with None instead of 0) ---
-@st.cache_data(ttl=60)
-def get_live_aqicn_data():
-    try:
-        url = f"https://api.waqi.info/feed/lahore/?token={AQICN_TOKEN}"
-        res = requests.get(url).json()
-        if res.get('status') == 'ok':
-            data = res['data']['iaqi']
-            return {
-                'PM2.5': data.get('pm25', {}).get('v', None),
-                'PM10': data.get('pm10', {}).get('v', None),
-                'CO': data.get('co', {}).get('v', None),
-                'NO2': data.get('no2', {}).get('v', None)
-            }
-    except:
-        pass
-    return None
-
-live_aqi = get_live_aqicn_data()
-
-# --- 5. Sidebar ---
+# --- 4. Sidebar ---
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/3203/3203071.png", width=100)
     st.title("🌱 10Shine AQI")
     st.write("Real-time Lahore Air Quality and AI Forecast.")
 
-# --- 6. Main UI Header ---
+# --- 5. Main UI Header ---
 st.title("🌍 Lahore Real-Time AQI & AI Forecast")
 st.markdown("Automated 24-Hour & 3-Day Environmental Outlook")
 st.divider()
@@ -87,19 +63,17 @@ st.divider()
 if df_history.empty:
     st.error("⚠️ Loading Data... Please wait.")
 else:
-    latest_mongo_row = df_history.iloc[0]
+    latest_row = df_history.iloc[0]
     
-    # --- SMART FALLBACK LOGIC ---
-    if live_aqi is None:
-        st.warning("⚠️ Live API Token is missing/invalid. Falling back to MongoDB backend data.")
-        
-    live_pm25 = live_aqi['PM2.5'] if (live_aqi and live_aqi['PM2.5'] is not None) else latest_mongo_row['PM2.5']
-    live_pm10 = live_aqi['PM10'] if (live_aqi and live_aqi['PM10'] is not None) else latest_mongo_row['PM10']
-    live_co = live_aqi['CO'] if (live_aqi and live_aqi['CO'] is not None) else latest_mongo_row['CO']
-    live_no2 = live_aqi['NO2'] if (live_aqi and live_aqi['NO2'] is not None) else latest_mongo_row['NO2']
+    # Live variables from our consistent backend
+    live_pm25 = latest_row['PM2.5']
+    live_pm10 = latest_row['PM10']
+    live_co = latest_row['CO']
+    live_no2 = latest_row['NO2']
 
     # --- REQUIREMENT MET: HAZARDOUS ALERT ---
-    if live_pm25 > 150:
+    # Realistic threshold for Open-Meteo raw values
+    if live_pm25 > 75: 
         st.markdown(f'<div class="alert-box">🚨 HAZARDOUS AQI ALERT: Current PM2.5 levels ({live_pm25} µg/m³) are dangerously high! Please avoid outdoor activities and wear a mask.</div>', unsafe_allow_html=True)
 
     # --- AUTO-GENERATE FUTURE PREDICTIONS ---
@@ -109,7 +83,7 @@ else:
     future_24h = []
     for i in range(1, 25):
         fut_time = current_time_pkt + timedelta(hours=i)
-        input_data = latest_mongo_row.copy()
+        input_data = latest_row.copy()
         input_data['hour'] = fut_time.hour
         input_data['day'] = fut_time.day
         input_data['month'] = fut_time.month
@@ -125,7 +99,7 @@ else:
     future_3d = []
     for i in range(1, 4):
         fut_date = current_time_pkt + timedelta(days=i)
-        input_data = latest_mongo_row.copy()
+        input_data = latest_row.copy()
         input_data['day'] = fut_date.day
         
         if model is not None:
@@ -142,10 +116,10 @@ else:
     with tab1:
         st.subheader("Live Environmental Metrics")
         col1, col2, col3, col4 = st.columns(4)
-        col1.metric("🌫️ PM2.5 (AQI Proxy)", f"{live_pm25} µg/m³")
-        col2.metric("😷 PM10 Level", f"{live_pm10} µg/m³")
-        col3.metric("🚗 Carbon Monoxide (CO)", f"{live_co} µg/m³")
-        col4.metric("🏭 Nitrogen Dioxide (NO2)", f"{live_no2} µg/m³")
+        col1.metric("🌫️ PM2.5 (Raw µg/m³)", f"{live_pm25:.1f} µg/m³")
+        col2.metric("😷 PM10 Level", f"{live_pm10:.1f} µg/m³")
+        col3.metric("🚗 Carbon Monoxide (CO)", f"{live_co:.1f} µg/m³")
+        col4.metric("🏭 Nitrogen Dioxide (NO2)", f"{live_no2:.1f} µg/m³")
 
     # TAB 2: NEXT 24 HOURS GRAPH
     with tab2:
@@ -160,8 +134,8 @@ else:
         cols = st.columns(3)
         for idx, day_data in enumerate(future_3d):
             val = day_data['Predicted PM2.5']
-            status = "🟢 Good" if val <= 50 else "🟡 Moderate" if val <= 100 else "🔴 Unhealthy"
-            color = "#d4edda" if val <= 50 else "#fff3cd" if val <= 100 else "#f8d7da"
+            status = "🟢 Good" if val <= 35 else "🟡 Moderate" if val <= 75 else "🔴 Unhealthy"
+            color = "#d4edda" if val <= 35 else "#fff3cd" if val <= 75 else "#f8d7da"
             with cols[idx]:
                 st.markdown(f'<div class="forecast-box" style="background-color: {color};"><h3>{day_data["Date"]}</h3><h2>{val} µg/m³</h2><p><b>{status}</b></p></div>', unsafe_allow_html=True)
 
