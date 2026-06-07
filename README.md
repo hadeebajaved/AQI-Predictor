@@ -47,7 +47,4 @@ This project utilizes a modern MLOps architecture rather than a conventional sta
 git clone https://github.com/hadeebajaved/AQI-Predictor.git
 cd AQI-Predictor
 
-**2. Install Dependencies:**
-```bash
-pip install -r requirements.txt
 
